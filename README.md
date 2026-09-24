@@ -27,4 +27,4 @@ git clone [https://github.com/tolotelin99/api-security-scanner.git](https://gith
 cd api-security-scanner
 
 # 3. Ejecutar la herramienta
-python scanner.py
+python scanner.py -u https://httpbin.org/get

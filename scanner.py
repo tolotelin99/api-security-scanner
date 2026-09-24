@@ -2,8 +2,20 @@ import urllib.request
 import urllib.error
 from urllib.parse import urlparse
 import ssl
+import argparse
+import sys
 
-objetivo = "https://httpbin.org/get"
+# --- CONFIGURACIÓN DE ARGUMENTOS DE CONSOLA ---
+parser = argparse.ArgumentParser(description="API Security Scanner - Herramienta de Reconocimiento")
+parser.add_argument("-u", "--url", help="URL objetivo a escanear (ej. https://ejemplo.com)", required=True)
+
+# Mostrar menú de ayuda si el usuario no ingresa parámetros
+if len(sys.argv) == 1:
+    parser.print_help(sys.stderr)
+    sys.exit(1)
+
+args = parser.parse_args()
+objetivo = args.url
 contexto_ssl = ssl._create_unverified_context()
 
 print(f"[*] Iniciando auditoría en: {objetivo}\n")
@@ -37,11 +49,9 @@ for metodo in metodos:
 # --- FASE 3: BÚSQUEDA DE RUTAS SENSIBLES (FUZZING) ---
 print("\n[*] FASE 3: Buscando rutas sensibles...")
 
-# Extraemos la base del dominio
 parsed_url = urlparse(objetivo)
 base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
 
-# Diccionario de rutas críticas
 rutas_comunes = [
     "/admin",
     "/api/v1",
@@ -59,10 +69,8 @@ for ruta in rutas_comunes:
         resp = urllib.request.urlopen(req, context=contexto_ssl)
         print(f"   [!] ALERTA CRÍTICA: Ruta expuesta -> {url_prueba} (Código 200)")
     except urllib.error.HTTPError as e:
-        # 401 o 403: El archivo existe pero pide contraseña (útil saberlo)
         if e.code in [401, 403]:
             print(f"   [+] Ruta protegida detectada: {url_prueba} (Código {e.code})")
-        # 404: No existe. Hacemos "pass" para no ensuciar la consola.
         elif e.code == 404:
             pass
         else:

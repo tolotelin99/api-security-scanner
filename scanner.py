@@ -1,79 +1,135 @@
-import urllib.request
-import urllib.error
-from urllib.parse import urlparse
-import ssl
 import argparse
+import random
+import socket
 import sys
+import time
+import requests
 
-# --- CONFIGURACIÓN DE ARGUMENTOS DE CONSOLA ---
-parser = argparse.ArgumentParser(description="API Security Scanner - Herramienta de Reconocimiento")
-parser.add_argument("-u", "--url", help="URL objetivo a escanear (ej. https://ejemplo.com)", required=True)
+# Desactivar advertencias de SSL
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Mostrar menú de ayuda si el usuario no ingresa parámetros
-if len(sys.argv) == 1:
-    parser.print_help(sys.stderr)
-    sys.exit(1)
-
-args = parser.parse_args()
-objetivo = args.url
-contexto_ssl = ssl._create_unverified_context()
-
-print(f"[*] Iniciando auditoría en: {objetivo}\n")
-
-# --- FASE 1: ESCANEO DE HEADERS ---
-print("[*] FASE 1: Extracción de Headers...")
-try:
-    respuesta = urllib.request.urlopen(objetivo, context=contexto_ssl)
-    for header, valor in respuesta.headers.items():
-        print(f"   - {header}: {valor}")
-except Exception as e:
-    print(f"   [!] Error al obtener headers: {e}")
-
-# --- FASE 2: DETECCIÓN DE MÉTODOS HTTP ---
-print("\n[*] FASE 2: Probando métodos HTTP...")
-metodos = ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
-
-for metodo in metodos:
-    try:
-        peticion = urllib.request.Request(objetivo, method=metodo)
-        respuesta = urllib.request.urlopen(peticion, context=contexto_ssl)
-        print(f"   [+] {metodo}: ABIERTO (Código {respuesta.getcode()})")
-    except urllib.error.HTTPError as error_http:
-        if error_http.code == 405:
-            print(f"   [-] {metodo}: BLOQUEADO (405 Not Allowed)")
-        else:
-            print(f"   [?] {metodo}: ESTADO {error_http.code}")
-    except Exception as e:
-        print(f"   [!] {metodo}: ERROR DE CONEXIÓN")
-
-# --- FASE 3: BÚSQUEDA DE RUTAS SENSIBLES (FUZZING) ---
-print("\n[*] FASE 3: Buscando rutas sensibles...")
-
-parsed_url = urlparse(objetivo)
-base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-
-rutas_comunes = [
-    "/admin",
-    "/api/v1",
-    "/.env",
-    "/swagger.json",
-    "/robots.txt",
-    "/backup.zip",
-    "/config.php"
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
 ]
 
-for ruta in rutas_comunes:
-    url_prueba = base_url + ruta
+# Dejamos tus rutas originales y agregamos la raíz "/"
+COMMON_PATHS = [
+    "/",
+    "/flmngr",
+    "/sites/default/files/flmngr",
+    "/admin/config/content/n1ed"
+]
+
+def network_recon(domain_or_ip):
+    print("\n========================================")
+    print("      MÓDULO DE RECONOCIMIENTO (RECON)   ")
+    print("========================================")
+    clean_target = domain_or_ip.replace("https://", "").replace("http://", "").split("/")[0]
+
     try:
-        req = urllib.request.Request(url_prueba, method="GET")
-        resp = urllib.request.urlopen(req, context=contexto_ssl)
-        print(f"   [!] ALERTA CRÍTICA: Ruta expuesta -> {url_prueba} (Código 200)")
-    except urllib.error.HTTPError as e:
-        if e.code in [401, 403]:
-            print(f"   [+] Ruta protegida detectada: {url_prueba} (Código {e.code})")
-        elif e.code == 404:
-            pass
+        print(f"[*] Resolviendo dirección IP para: {clean_target}")
+        ip_address = socket.gethostbyname(clean_target)
+        print(f"    [+] Dirección IP principal: {ip_address}")
+        try:
+            hostname, _, _ = socket.gethostbyaddr(ip_address)
+            print(f"    [+] Hostname asociado (Lookup inverso): {hostname}")
+        except socket.herror:
+            print("    [-] Lookup inverso no disponible.")
+    except socket.gaierror as e:
+        print(f"    [-] Error DNS/IP: {e}")
+    print("-" * 50)
+
+def evasive_request(url, method, headers, payload=None):
+    headers["User-Agent"] = random.choice(USER_AGENTS)
+    time.sleep(random.uniform(0.3, 1.0))
+    try:
+        if method == "OPTIONS":
+            return requests.options(url, headers=headers, timeout=5, verify=False)
+        elif method == "GET":
+            return requests.get(url, headers=headers, timeout=5, verify=False)
+        elif method == "POST":
+            return requests.post(url, headers=headers, json=payload, timeout=5, verify=False)
+    except requests.exceptions.RequestException:
+        return None
+
+def audit_security_headers(headers, url):
+    """Módulo nuevo: Analiza la seguridad de las cabeceras HTTP"""
+    print(f"\n    [+] Auditando cabeceras de seguridad para: {url}")
+    security_headers = {
+        "Strict-Transport-Security": "Fuerza HTTPS",
+        "X-Frame-Options": "Protege contra Clickjacking",
+        "X-Content-Type-Options": "Evita MIME-sniffing",
+        "Content-Security-Policy": "Previene XSS",
+    }
+    headers_lower = {k.lower(): v for k, v in headers.items()}
+    score = 0
+    for header, description in security_headers.items():
+        if header.lower() in headers_lower:
+            print(f"        [V] {header}: PRESENTE")
+            score += 1
         else:
-            print(f"   [?] Estado {e.code}: {url_prueba}")
-    except Exception:
-        pass
+            print(f"        [X] {header}: AUSENTE - {description}")
+    print(f"        [*] Puntuación: {score}/{len(security_headers)}")
+
+def comprehensive_scan(base_url, api_key=None):
+    headers = {
+        "Referer": base_url,
+        "Origin": base_url,
+        "Content-Type": "application/json",
+        "X-Forwarded-For": "192.168.1.100",
+    }
+    payload = {"key": api_key} if api_key else None
+    base_url = base_url.rstrip("/")
+
+    print("\n========================================")
+    print("    ESCÁNER DE VULNERABILIDADES Y FUZZER  ")
+    print("========================================")
+    print(f"[*] Objetivo base: {base_url}")
+    print("=" * 50)
+
+    for path in COMMON_PATHS:
+        target_url = f"{base_url}{path}"
+        print(f"\n[->] Analizando ruta: {target_url}")
+
+        # OPTIONS
+        res_opt = evasive_request(target_url, "OPTIONS", headers)
+        if res_opt is not None:
+            allowed = res_opt.headers.get("Allow", "No especificado")
+            print(f"    [i] OPTIONS Status: {res_opt.status_code} | Métodos: {allowed}")
+
+        # GET (Con el bug de Python arreglado)
+        res_get = evasive_request(target_url, "GET", headers)
+        if res_get is not None:
+            print(f"    [i] GET Status: {res_get.status_code}")
+            if res_get.status_code == 200:
+                print(f"        [!] Endpoint accesible por GET: {target_url}")
+                audit_security_headers(res_get.headers, target_url)
+
+        # POST (Con el bug de Python arreglado)
+        res_post = evasive_request(target_url, "POST", headers, payload)
+        if res_post is not None:
+            print(f"    [i] POST Status: {res_post.status_code}")
+
+        print("-" * 50)
+
+def main():
+    parser = argparse.ArgumentParser(description="ApiSecurityScanner Suite Pro v5.3")
+    parser.add_argument("-u", "--url", required=True, help="URL objetivo")
+    parser.add_argument("-k", "--key", required=False, default=None, help="API Key")
+    parser.add_argument("--recon", action="store_true", help="Reconocimiento de red")
+    args = parser.parse_args()
+
+    print("==================================================")
+    print("    API SECURITY SCANNER SUITE - EDG v5.3       ")
+    print("==================================================")
+
+    if args.recon:
+        network_recon(args.url)
+
+    comprehensive_scan(args.url, args.key)
+
+if __name__ == "__main__":
+    main()

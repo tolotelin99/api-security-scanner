@@ -1,13 +1,11 @@
 import argparse
 import random
+import secrets
 import socket
 import sys
 import time
+import os
 import requests
-
-# Desactivar advertencias de SSL
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -15,7 +13,6 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
 ]
 
-# Dejamos tus rutas originales y agregamos la raíz "/"
 COMMON_PATHS = [
     "/",
     "/flmngr",
@@ -28,7 +25,6 @@ def network_recon(domain_or_ip):
     print("      MÓDULO DE RECONOCIMIENTO (RECON)   ")
     print("========================================")
     clean_target = domain_or_ip.replace("https://", "").replace("http://", "").split("/")[0]
-
     try:
         print(f"[*] Resolviendo dirección IP para: {clean_target}")
         ip_address = socket.gethostbyname(clean_target)
@@ -43,20 +39,20 @@ def network_recon(domain_or_ip):
     print("-" * 50)
 
 def evasive_request(url, method, headers, payload=None):
-    headers["User-Agent"] = random.choice(USER_AGENTS)
+    headers["User-Agent"] = secrets.choice(USER_AGENTS)
     time.sleep(random.uniform(0.3, 1.0))
+
     try:
         if method == "OPTIONS":
-            return requests.options(url, headers=headers, timeout=5, verify=False)
+            return requests.options(url, headers=headers, timeout=5, verify=True)
         elif method == "GET":
-            return requests.get(url, headers=headers, timeout=5, verify=False)
+            return requests.get(url, headers=headers, timeout=5, verify=True)
         elif method == "POST":
-            return requests.post(url, headers=headers, json=payload, timeout=5, verify=False)
+            return requests.post(url, headers=headers, json=payload, timeout=5, verify=True)
     except requests.exceptions.RequestException:
         return None
 
 def audit_security_headers(headers, url):
-    """Módulo nuevo: Analiza la seguridad de las cabeceras HTTP"""
     print(f"\n    [+] Auditando cabeceras de seguridad para: {url}")
     security_headers = {
         "Strict-Transport-Security": "Fuerza HTTPS",
@@ -79,8 +75,9 @@ def comprehensive_scan(base_url, api_key=None):
         "Referer": base_url,
         "Origin": base_url,
         "Content-Type": "application/json",
-        "X-Forwarded-For": "192.168.1.100",
+        "X-Forwarded-For": os.getenv("SCANNER_FORWARDED_IP", "127.0.0.1"),
     }
+
     payload = {"key": api_key} if api_key else None
     base_url = base_url.rstrip("/")
 
@@ -94,13 +91,11 @@ def comprehensive_scan(base_url, api_key=None):
         target_url = f"{base_url}{path}"
         print(f"\n[->] Analizando ruta: {target_url}")
 
-        # OPTIONS
         res_opt = evasive_request(target_url, "OPTIONS", headers)
         if res_opt is not None:
             allowed = res_opt.headers.get("Allow", "No especificado")
             print(f"    [i] OPTIONS Status: {res_opt.status_code} | Métodos: {allowed}")
 
-        # GET (Con el bug de Python arreglado)
         res_get = evasive_request(target_url, "GET", headers)
         if res_get is not None:
             print(f"    [i] GET Status: {res_get.status_code}")
@@ -108,11 +103,9 @@ def comprehensive_scan(base_url, api_key=None):
                 print(f"        [!] Endpoint accesible por GET: {target_url}")
                 audit_security_headers(res_get.headers, target_url)
 
-        # POST (Con el bug de Python arreglado)
         res_post = evasive_request(target_url, "POST", headers, payload)
         if res_post is not None:
             print(f"    [i] POST Status: {res_post.status_code}")
-
         print("-" * 50)
 
 def main():
